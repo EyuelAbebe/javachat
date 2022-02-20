@@ -25,8 +25,7 @@ import java.util.Map;
  * @version 1.0
  */
 
-@ServerEndpoint(value = "/chat/{roomName}/{userName}", encoders = MessageEncoder.class, decoders = MessageDecoder.class)
-public class ChatServerEndpoint {
+public class ChatServerEndpoint extends Endpoint {
 
   private final static Logger log = Logger.getLogger(ChatServerEndpoint.class.getSimpleName());
   private static final Map<String, Room> rooms = Collections
@@ -40,43 +39,34 @@ public class ChatServerEndpoint {
         .forEach(roomName -> rooms.computeIfAbsent(roomName, new Room(roomName)));
   }
 
-  @OnOpen
-  public void onOpen(final Session session, @PathParam("roomName") String roomName,
-      @PathParam("userName") String userName) throws IOException, EncodeException {
+  @Override
+  public void onOpen(Session session, EndpointConfig config) {
 
-    session.setMaxIdleTimeout(5 * 60 * 1000);
+    // add message handler
+    session.addMessageHandler((MessageHandler.Whole<Message>) msg ->
+        {
+          System.out.println("message " + msg);
+          rooms.get(extractRoomFrom(session)).sendMessage(msg);
+        }
+    );
+
+    // set session level configuration
+    String roomName = session.getPathParameters().get("roomName");
+    String userName = session.getPathParameters().get("userName");
     session.getUserProperties().putIfAbsent("roomName", roomName);
     session.getUserProperties().putIfAbsent("userName", userName);
+    session.setMaxIdleTimeout(5 * 60 * 1000);
 
+    // store session
     Room room = rooms.get(roomName);
     room.join(session);
-    session.getBasicRemote().sendObject(objectify(WELCOME_MESSAGE));
-  }
 
-  @OnMessage
-  public void onMessage(Message message, Session session) {
-      rooms.get(extractRoomFrom(session)).sendMessage(message);
-  }
-
-  @OnMessage
-  public void onBinaryMessage(ByteBuffer message, Session session) {
-
-  }
-
-  @OnMessage
-  public void onPongMessage(PongMessage message, Session session) {
-
-  }
-
-  @OnClose
-  public void onClose(Session session, CloseReason reason) {
-    rooms.get(extractRoomFrom(session)).leave(session);
-    log.info(reason::getReasonPhrase);
-  }
-
-  @OnError
-  public void onError(Session session, Throwable error) {
-    log.info(error::getMessage);
+    // send welcome message
+    try {
+      session.getBasicRemote().sendObject(objectify(WELCOME_MESSAGE));
+    } catch (IOException | EncodeException e) {
+      log.info("Welcome message not sesnt");
+    }
   }
 
 
